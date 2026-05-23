@@ -100,12 +100,40 @@ for project_dir in "${COMPOSE_ROOT}"/*/; do
     continue
   }
 
+  # Primary check: pull output contains update markers.
   # Docker prints one of these phrases when a new image is fetched:
   #   "Pull complete"            – individual layer downloaded
   #   "Downloaded newer image"   – digest-level confirmation
   #   "Pulled"                   – newer docker compose plugin wording
+  update_detected=false
   if echo "$pull_output" | grep -qiE \
       "pull complete|downloaded newer image|: pulled|Status: Downloaded newer"; then
+    update_detected=true
+  fi
+
+  # Secondary check: compare each running container's image ID against the
+  # currently available local image. This catches the case where the same
+  # image is shared across multiple projects — Docker reports "up to date"
+  # on the second pull (the layers are already present), but the running
+  # containers in this project are still using the old image.
+  if [[ "$update_detected" == false ]]; then
+    while IFS= read -r container_id; do
+      [[ -z "$container_id" ]] && continue
+      container_image_id=$(sudo docker inspect "$container_id" \
+        --format '{{.Image}}' 2>/dev/null || true)
+      image_name=$(sudo docker inspect "$container_id" \
+        --format '{{.Config.Image}}' 2>/dev/null || true)
+      [[ -z "$container_image_id" || -z "$image_name" ]] && continue
+      current_image_id=$(sudo docker image inspect "$image_name" \
+        --format '{{.Id}}' 2>/dev/null || true)
+      if [[ -n "$current_image_id" && "$container_image_id" != "$current_image_id" ]]; then
+        update_detected=true
+        break
+      fi
+    done < <($COMPOSE -f "$compose_file" ps --status running --quiet 2>/dev/null)
+  fi
+
+  if [[ "$update_detected" == true ]]; then
     ok "${project_name}: new image(s) found — restarting project."
 
     # Bring the project down (removes containers, keeps volumes/networks)
