@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Test stub emulating the docker subcommands used by docker-update.sh.
+# Not a general docker fake — it mirrors exactly the calls the script makes;
+# if the script starts using different docker/compose commands, update this
+# stub to match.
+#
+# Global state lives in $STUB_STATE:
+#   container_image/<cid>      image ID the container is running
+#   container_name/<cid>       image name:tag the container was created from
+#   image_id/<name>            current local image ID for a tag
+#                              ('/' in image names is replaced with '_')
+#   pruned                     created when 'image prune' runs
+#
+# Per-project behaviour comes from .stub_* files in the compose project dir
+# (docker-update.sh cds there before every compose call):
+#   .stub_ids                  container IDs reported by 'ps --quiet'
+#   .stub_services             services reported by 'ps --services'
+#   .stub_services_after_<n>   services reported after the n-th 'up'
+#   .stub_up_count             written by the stub: number of 'up' calls
+#   .stub_down_done            created when 'down' runs
+#   .stub_ps_fail              if present, 'ps' fails
+#   .stub_pull_fail            if present, 'pull' fails
+# =============================================================================
+set -u
+cmd="$1"; shift
+case "$cmd" in
+  info) exit 0 ;;
+  compose)
+    sub="$1"; shift
+    case "$sub" in
+      version) echo "Docker Compose version v2.99.9-stub" ;;
+      ps)
+        quiet=false; services=false
+        for a in "$@"; do
+          [[ $a == --quiet || $a == -q ]] && quiet=true
+          [[ $a == --services ]] && services=true
+        done
+        [[ -f .stub_ps_fail ]] && { echo "stub: daemon error" >&2; exit 1; }
+        if $quiet; then
+          cat .stub_ids 2>/dev/null || true
+        elif $services; then
+          n=$(cat .stub_up_count 2>/dev/null || echo 0)
+          if [[ $n -gt 0 && -f ".stub_services_after_$n" ]]; then
+            cat ".stub_services_after_$n"
+          else
+            cat .stub_services 2>/dev/null || true
+          fi
+        fi
+        ;;
+      pull)
+        [[ -f .stub_pull_fail ]] && { echo "Error response from daemon: manifest unknown"; exit 1; }
+        echo "stub: pulled"
+        ;;
+      up)
+        n=$(cat .stub_up_count 2>/dev/null || echo 0)
+        echo $((n + 1)) > .stub_up_count
+        ;;
+      down) touch .stub_down_done ;;
+      *) echo "stub: unexpected compose subcommand: $sub" >&2; exit 64 ;;
+    esac
+    ;;
+  inspect)
+    # docker inspect --format FMT CID
+    fmt="$2"; id="$3"
+    case "$fmt" in
+      '{{.Image}}')        cat "$STUB_STATE/container_image/$id" 2>/dev/null || exit 1 ;;
+      '{{.Config.Image}}') cat "$STUB_STATE/container_name/$id" 2>/dev/null || exit 1 ;;
+      *) exit 64 ;;
+    esac
+    ;;
+  image)
+    sub="$1"; shift
+    case "$sub" in
+      inspect)
+        # docker image inspect --format '{{.Id}}' NAME
+        name="$3"
+        cat "$STUB_STATE/image_id/${name//\//_}" 2>/dev/null || exit 1
+        ;;
+      prune) touch "$STUB_STATE/pruned" ;;
+      *) exit 64 ;;
+    esac
+    ;;
+  *) echo "stub: unexpected command: $cmd" >&2; exit 64 ;;
+esac
