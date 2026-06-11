@@ -68,6 +68,16 @@ When output is not a terminal, colours are suppressed and each log line is prefi
 - `--dry-run` still pulls images (that is inherent to detecting updates); it only skips the restart and the prune.
 - The lockfile lives at `${TMPDIR:-/tmp}/docker-update.lock`.
 
+## Testing
+
+The repository ships a regression test suite that runs against a fake `docker` binary (`tests/stub/docker`) — no Docker daemon needed:
+
+```bash
+tests/run-tests.sh
+```
+
+It covers every code path: skip reasons, update detection, restart without `down`, the sidecar fallback, pull/`ps` failures, dry-run, the lockfile, and argument handling. Note the stub mirrors the exact docker/compose commands the script uses — if you change which commands the script calls, update the stub to match. It validates the script's logic, not real Docker behaviour; `--dry-run` against a real host remains the integration check.
+
 ## License
 
 MIT
