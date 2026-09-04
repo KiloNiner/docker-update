@@ -176,10 +176,13 @@ for project_dir in "${COMPOSE_ROOT}"/*/; do
   # -------------------------------------------------------------------------
   # Check whether the project has at least one running container. A failing
   # 'compose ps' is a project failure, not the same as "nothing running".
+  # stderr is discarded here (compose commonly warns there, e.g. about unset
+  # .env variables) so a warning can never be mistaken for a container ID on
+  # the success path; on failure it's re-fetched for the diagnostic message.
   # -------------------------------------------------------------------------
-  if ! ps_output=$(compose ps --status running --quiet 2>&1); then
+  if ! ps_output=$(compose ps --status running --quiet 2>/dev/null); then
     err "${project_name}: 'compose ps' failed:"
-    printf '%s\n' "$ps_output" | tail -n 3 >&2
+    compose ps --status running --quiet 2>&1 >/dev/null | tail -n 3 >&2 || true
     failed_projects+=("${project_name}")
     echo
     continue

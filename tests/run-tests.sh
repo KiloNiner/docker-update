@@ -138,6 +138,23 @@ assert_contains "ps failure reported"  "'compose ps' failed" "$output"
 assert_missing  "not counted as skipped" "psfail (not running)" "$output"
 
 # ---------------------------------------------------------------------------
+echo "test: stderr warnings from 'compose ps' are not mistaken for container IDs"
+reset_env
+# Stopped project: 'ps --quiet' prints nothing on stdout but a compose-style
+# warning on stderr. That warning must not be treated as a running container.
+mkdir -p "$ROOT/stopped-warn" && touch "$ROOT/stopped-warn/compose.yml" \
+  "$ROOT/stopped-warn/.stub_ids" "$ROOT/stopped-warn/.stub_ps_warn"
+# Running project with the same warning: the real container must still be
+# detected exactly once, not miscounted because of the stderr noise.
+new_project warned c9 nginx:latest sha256:aaa sha256:aaa web
+touch "$ROOT/warned/.stub_ps_warn"
+run_script
+assert_eq       "exits 0"                       0 "$rc"
+assert_contains "stopped project still skipped" "stopped-warn (not running)" "$output"
+assert_contains "warning not counted as running" "warned: 1 running container(s) detected." "$output"
+assert_contains "running project still detected" "warned (already up to date)" "$output"
+
+# ---------------------------------------------------------------------------
 echo "test: dry-run detects but changes nothing"
 reset_env
 new_project app c8 ghcr.io/foo/app:latest sha256:old sha256:new app

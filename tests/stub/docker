@@ -20,6 +20,9 @@
 #   .stub_up_count             written by the stub: number of 'up' calls
 #   .stub_down_done            created when 'down' runs
 #   .stub_ps_fail              if present, 'ps' fails
+#   .stub_ps_warn              if present, 'ps --quiet' also writes a
+#                              compose-style warning to stderr (simulates an
+#                              unset .env variable) without failing
 #   .stub_pull_fail            if present, 'pull' fails
 # =============================================================================
 set -u
@@ -38,6 +41,7 @@ case "$cmd" in
         done
         [[ -f .stub_ps_fail ]] && { echo "stub: daemon error" >&2; exit 1; }
         if $quiet; then
+          [[ -f .stub_ps_warn ]] && echo 'WARN[0000] The "FOO" variable is not set. Defaulting to a blank string.' >&2
           cat .stub_ids 2>/dev/null || true
         elif $services; then
           n=$(cat .stub_up_count 2>/dev/null || echo 0)
