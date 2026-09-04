@@ -72,6 +72,14 @@ err()  { printf '%s%b%s ✖%b %s\n' "$(ts)" "$RED"    "$LOG_PREFIX" "$RESET" "$*
 # Prevent overlapping runs (e.g. a manual run colliding with cron)
 # ---------------------------------------------------------------------------
 if command -v flock >/dev/null 2>&1; then
+  # LOCK_FILE lives in a shared, world-writable directory by default ($TMPDIR
+  # or /tmp). A legitimate lock file is always a plain file this script
+  # created itself, so refuse a symlink outright rather than risk 'exec 9>'
+  # opening (and truncating) whatever it points to.
+  if [[ -L "$LOCK_FILE" ]]; then
+    err "Refusing to use lock file '${LOCK_FILE}': it is a symlink."
+    exit 1
+  fi
   exec 9>"$LOCK_FILE"
   if ! flock -n 9; then
     err "Another docker-update run is already in progress (lock: ${LOCK_FILE})."

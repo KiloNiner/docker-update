@@ -173,6 +173,17 @@ assert_eq       "exits 1"        1 "$rc"
 assert_contains "lock reported"  "already in progress" "$output"
 
 # ---------------------------------------------------------------------------
+echo "test: symlinked lock file is refused, not followed"
+reset_env
+canary="$WORK/canary"
+printf 'untouched\n' > "$canary"
+ln -s "$canary" "$WORK/docker-update.lock"
+rc=0; output=$(bash "$SCRIPT" --root "$ROOT" 2>&1) || rc=$?
+assert_eq       "exits 1"               1 "$rc"
+assert_contains "symlink lock refused"  "it is a symlink" "$output"
+assert_eq       "canary file untouched" "untouched" "$(cat "$canary")"
+
+# ---------------------------------------------------------------------------
 echo "test: argument handling"
 reset_env
 rc=0; bash "$SCRIPT" --root "$WORK/does-not-exist" >/dev/null 2>&1 || rc=$?

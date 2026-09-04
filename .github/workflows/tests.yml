@@ -1,0 +1,13 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run regression suite
+        run: bash tests/run-tests.sh
