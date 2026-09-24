@@ -19,6 +19,9 @@
 #   .stub_services_after_<n>   services reported after the n-th 'up'
 #   .stub_up_count             written by the stub: number of 'up' calls
 #   .stub_down_done            created when 'down' runs
+#   .stub_pull_args            written by the stub: args of the last 'pull'
+#   .stub_up_args              written by the stub: args of each 'up', one
+#                              call per line
 #   .stub_ps_fail              if present, 'ps' fails
 #   .stub_ps_warn              if present, 'ps --quiet' also writes a
 #                              compose-style warning to stderr (simulates an
@@ -53,12 +56,14 @@ case "$cmd" in
         fi
         ;;
       pull)
+        printf '%s\n' "$*" > .stub_pull_args
         [[ -f .stub_pull_fail ]] && { echo "Error response from daemon: manifest unknown"; exit 1; }
         echo "stub: pulled"
         ;;
       up)
         n=$(cat .stub_up_count 2>/dev/null || echo 0)
         echo $((n + 1)) > .stub_up_count
+        printf '%s\n' "$*" >> .stub_up_args
         ;;
       down) touch .stub_down_done ;;
       *) echo "stub: unexpected compose subcommand: $sub" >&2; exit 64 ;;

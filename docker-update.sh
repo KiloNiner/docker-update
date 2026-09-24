@@ -80,7 +80,9 @@ if command -v flock >/dev/null 2>&1; then
     err "Refusing to use lock file '${LOCK_FILE}': it is a symlink."
     exit 1
   fi
-  exec 9>"$LOCK_FILE"
+  # Open in append mode so even a symlink swapped in after the check above
+  # can never be truncated.
+  exec 9>>"$LOCK_FILE"
   if ! flock -n 9; then
     err "Another docker-update run is already in progress (lock: ${LOCK_FILE})."
     exit 1
@@ -211,10 +213,24 @@ for project_dir in "${COMPOSE_ROOT}"/*/; do
   log "${project_name}: ${#running_ids[@]} running container(s) detected."
   services_before=$(running_services)
 
+  # Pull and restart only the services that are running now: a bare 'up -d'
+  # would also start services the user stopped on purpose.
+  services_list=()
+  while IFS= read -r svc; do
+    [[ -n "$svc" ]] && services_list+=("$svc")
+  done <<<"$services_before"
+
+  if [[ ${#services_list[@]} -eq 0 ]]; then
+    err "${project_name}: could not list running services — skipping."
+    failed_projects+=("${project_name}")
+    echo
+    continue
+  fi
+
   # -------------------------------------------------------------------------
   # Pull images
   # -------------------------------------------------------------------------
-  if ! pull_output=$(compose pull 2>&1); then
+  if ! pull_output=$(compose pull "${services_list[@]}" 2>&1); then
     err "${project_name}: 'compose pull' failed — skipping restart. Last output:"
     printf '%s\n' "$pull_output" | tail -n 5 >&2
     failed_projects+=("${project_name}")
@@ -261,7 +277,7 @@ for project_dir in "${COMPOSE_ROOT}"/*/; do
   # -------------------------------------------------------------------------
   ok "${project_name}: new image(s) found — updating project."
 
-  if ! compose up -d --remove-orphans; then
+  if ! compose up -d --remove-orphans "${services_list[@]}"; then
     err "${project_name}: 'compose up' failed."
     failed_projects+=("${project_name}")
     echo
@@ -275,7 +291,7 @@ for project_dir in "${COMPOSE_ROOT}"/*/; do
   missing=$(missing_services "$services_before" "$(running_services)")
   if [[ -n "$missing" ]]; then
     warn "${project_name}: not running after 'up -d': ${missing//$'\n'/ } — trying full down/up."
-    if ! compose down || ! compose up -d; then
+    if ! compose down || ! compose up -d "${services_list[@]}"; then
       err "${project_name}: full restart failed."
       failed_projects+=("${project_name}")
       echo

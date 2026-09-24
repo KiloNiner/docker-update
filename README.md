@@ -6,7 +6,7 @@ A Bash script that keeps Docker Compose projects up to date by pulling fresh ima
 
 - Scans every subdirectory of the compose root (default `/volume2/docker/`) for a Compose file
 - Skips projects with no running containers, and projects containing a `.no-update` marker file
-- Pulls the latest images for each running project
+- Pulls the latest images for the services that are currently running in each project (services you stopped on purpose are left alone — never pulled, never started)
 - Restarts a project **only** if at least one image was updated — and uses `compose up -d`, so only the changed containers (and their dependents) are recreated, not the whole project
 - Verifies that every service that was running before is running again; if not, falls back to a full `down` + `up -d` for that project
 - Prunes dangling images at the end when something was updated
@@ -57,8 +57,8 @@ When output is not a terminal, colours are suppressed and each log line is prefi
 3. Loops over each subdirectory in the compose root, skipping directories with a `.no-update` marker or no Compose file (`docker-compose.yml`, `docker-compose.yaml`, `compose.yml`, `compose.yaml`)
 4. Runs Compose from *inside* each project directory, so `.env` and `docker-compose.override.yml` are honoured exactly as when running Compose by hand
 5. Skips the project if no containers are running
-6. Runs `compose pull`, then compares each running container's image ID against the now-current local image ID for its tag — an exact check that also catches images shared between projects, where the second project's pull is a no-op but its containers still run the old image
-7. If an update is found: runs `compose up -d --remove-orphans`, which recreates only the changed containers and their dependents (including `network_mode: service:<name>` sidecars)
+6. Runs `compose pull <running services>`, then compares each running container's image ID against the now-current local image ID for its tag — an exact check that also catches images shared between projects, where the second project's pull is a no-op but its containers still run the old image
+7. If an update is found: runs `compose up -d --remove-orphans <running services>`, which recreates only the changed containers and their dependents (including `network_mode: service:<name>` sidecars)
 8. Verifies all previously-running services are running again; if any are missing, retries with a full `compose down` + `compose up -d` before marking the project failed
 9. Prunes dangling images (`docker image prune -f`) when at least one project was updated (skipped in `--dry-run`)
 10. Prints a summary and exits with code `1` if any project failed

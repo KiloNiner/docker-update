@@ -105,6 +105,25 @@ assert_eq       "two 'up' calls"      2 "$(cat "$ROOT/side/.stub_up_count")"
 assert_contains "reported updated"    "side: updated and restarted successfully" "$output"
 
 # ---------------------------------------------------------------------------
+echo "test: only running services are pulled and restarted"
+reset_env
+# 'worker' exists in the compose file but was stopped on purpose; it is not
+# in the running-services list, so it must never be pulled or started.
+new_project partial c10 foo/app:1 sha256:old sha256:new app db
+run_script
+assert_eq       "exits 0"                 0 "$rc"
+assert_eq       "pull scoped to running"  "app db" "$(cat "$ROOT/partial/.stub_pull_args")"
+assert_eq       "up scoped to running"    "-d --remove-orphans app db" "$(cat "$ROOT/partial/.stub_up_args")"
+
+echo "test: full down/up fallback is also scoped to running services"
+reset_env
+new_project scoped c11 foo/bar:1 sha256:old sha256:new app sidecar
+printf 'app\n' > "$ROOT/scoped/.stub_services_after_1"
+run_script
+assert_eq       "exits 0"                 0 "$rc"
+assert_eq       "fallback up scoped"      "-d app sidecar" "$(sed -n 2p "$ROOT/scoped/.stub_up_args")"
+
+# ---------------------------------------------------------------------------
 echo "test: fallback that still fails marks project failed"
 reset_env
 new_project broke c4 foo/bar:1 sha256:old sha256:new app sidecar
