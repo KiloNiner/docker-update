@@ -113,7 +113,7 @@ new_project partial c10 foo/app:1 sha256:old sha256:new app db
 run_script
 assert_eq       "exits 0"                 0 "$rc"
 assert_eq       "pull scoped to running"  "app db" "$(cat "$ROOT/partial/.stub_pull_args")"
-assert_eq       "up scoped to running"    "-d --remove-orphans app db" "$(cat "$ROOT/partial/.stub_up_args")"
+assert_eq       "up scoped to running"    "-d --wait --wait-timeout 300 --remove-orphans app db" "$(cat "$ROOT/partial/.stub_up_args")"
 
 echo "test: full down/up fallback is also scoped to running services"
 reset_env
@@ -121,7 +121,39 @@ new_project scoped c11 foo/bar:1 sha256:old sha256:new app sidecar
 printf 'app\n' > "$ROOT/scoped/.stub_services_after_1"
 run_script
 assert_eq       "exits 0"                 0 "$rc"
-assert_eq       "fallback up scoped"      "-d app sidecar" "$(sed -n 2p "$ROOT/scoped/.stub_up_args")"
+assert_eq       "fallback up scoped"      "-d --wait --wait-timeout 300 app sidecar" "$(sed -n 2p "$ROOT/scoped/.stub_up_args")"
+
+# ---------------------------------------------------------------------------
+echo "test: service that never becomes healthy fails without down/up"
+reset_env
+new_project sick c12 foo/app:1 sha256:old sha256:new app
+touch "$ROOT/sick/.stub_unhealthy"
+run_script
+assert_eq       "exits 1"                 1 "$rc"
+assert_contains "unhealthy reported"      "services did not become healthy" "$output"
+assert_no_file  "no down performed"       "$ROOT/sick/.stub_down_done"
+assert_contains "in failed summary"       "• sick" "$output"
+
+echo "test: WAIT_TIMEOUT is passed through"
+reset_env
+new_project timed c13 foo/app:1 sha256:old sha256:new app
+WAIT_TIMEOUT=42 run_script
+assert_eq       "custom timeout used"     "-d --wait --wait-timeout 42 --remove-orphans app" "$(cat "$ROOT/timed/.stub_up_args")"
+
+echo "test: compose with --wait but no --wait-timeout"
+reset_env
+new_project basic c14 foo/app:1 sha256:old sha256:new app
+STUB_WAIT=basic run_script
+assert_eq       "exits 0"                 0 "$rc"
+assert_eq       "plain --wait used"       "-d --wait --remove-orphans app" "$(cat "$ROOT/basic/.stub_up_args")"
+
+echo "test: compose without --wait falls back to plain up -d"
+reset_env
+new_project oldc c15 foo/app:1 sha256:old sha256:new app
+STUB_WAIT=none run_script
+assert_eq       "exits 0"                 0 "$rc"
+assert_contains "missing --wait warned"   "health checks are not verified" "$output"
+assert_eq       "no wait flags"           "-d --remove-orphans app" "$(cat "$ROOT/oldc/.stub_up_args")"
 
 # ---------------------------------------------------------------------------
 echo "test: fallback that still fails marks project failed"
@@ -211,6 +243,8 @@ rc=0; bash "$SCRIPT" --bogus >/dev/null 2>&1 || rc=$?
 assert_eq "unknown option exits 2" 2 "$rc"
 rc=0; bash "$SCRIPT" --root >/dev/null 2>&1 || rc=$?
 assert_eq "--root without value exits 2" 2 "$rc"
+rc=0; WAIT_TIMEOUT=soon bash "$SCRIPT" --root "$ROOT" >/dev/null 2>&1 || rc=$?
+assert_eq "non-numeric WAIT_TIMEOUT exits 2" 2 "$rc"
 rc=0; bash "$SCRIPT" --help >/dev/null 2>&1 || rc=$?
 assert_eq "--help exits 0" 0 "$rc"
 

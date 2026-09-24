@@ -8,6 +8,7 @@ A Bash script that keeps Docker Compose projects up to date by pulling fresh ima
 - Skips projects with no running containers, and projects containing a `.no-update` marker file
 - Pulls the latest images for the services that are currently running in each project (services you stopped on purpose are left alone — never pulled, never started)
 - Restarts a project **only** if at least one image was updated — and uses `compose up -d`, so only the changed containers (and their dependents) are recreated, not the whole project
+- Waits for restarted services to be running **and healthy** (`compose up --wait`, where the Compose version supports it)
 - Verifies that every service that was running before is running again; if not, falls back to a full `down` + `up -d` for that project
 - Prunes dangling images at the end when something was updated
 - Uses a lockfile so a manual run can never collide with the cron run
@@ -58,7 +59,7 @@ When output is not a terminal, colours are suppressed and each log line is prefi
 4. Runs Compose from *inside* each project directory, so `.env` and `docker-compose.override.yml` are honoured exactly as when running Compose by hand
 5. Skips the project if no containers are running
 6. Runs `compose pull <running services>`, then compares each running container's image ID against the now-current local image ID for its tag — an exact check that also catches images shared between projects, where the second project's pull is a no-op but its containers still run the old image
-7. If an update is found: runs `compose up -d --remove-orphans <running services>`, which recreates only the changed containers and their dependents (including `network_mode: service:<name>` sidecars)
+7. If an update is found: runs `compose up -d --remove-orphans <running services>`, which recreates only the changed containers and their dependents (including `network_mode: service:<name>` sidecars). When Compose supports it, `--wait --wait-timeout $WAIT_TIMEOUT` is added so the command only succeeds once those services are running and, if they define a healthcheck, healthy; a service that never gets healthy marks the project failed (no down/up retry, which would only take the rest of the project offline)
 8. Verifies all previously-running services are running again; if any are missing, retries with a full `compose down` + `compose up -d` before marking the project failed
 9. Prunes dangling images (`docker image prune -f`) when at least one project was updated (skipped in `--dry-run`)
 10. Prints a summary and exits with code `1` if any project failed
@@ -66,6 +67,7 @@ When output is not a terminal, colours are suppressed and each log line is prefi
 ### Notes
 
 - `--dry-run` still pulls images (that is inherent to detecting updates); it only skips the restart and the prune.
+- `WAIT_TIMEOUT` (default `300`) bounds the health-check wait, in seconds. `--wait` needs Compose v2.1+ and `--wait-timeout` v2.17+; the script detects what is available and warns when health checks can't be verified. `SETTLE_SECONDS` (default `5`) is how long it pauses before re-checking which services are running.
 - The lockfile lives at `${TMPDIR:-/tmp}/docker-update.lock`.
 
 ## Testing

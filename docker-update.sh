@@ -16,6 +16,7 @@ LOG_PREFIX="[docker-update]"
 SKIP_MARKER=".no-update"
 LOCK_FILE="${TMPDIR:-/tmp}/docker-update.lock"
 SETTLE_SECONDS="${SETTLE_SECONDS:-5}"
+WAIT_TIMEOUT="${WAIT_TIMEOUT:-300}"
 DRY_RUN=false
 
 usage() {
@@ -33,6 +34,12 @@ Options:
   -h, --help    Show this help and exit
 
 A project directory is skipped when it contains a file named '${SKIP_MARKER}'.
+
+Environment:
+  WAIT_TIMEOUT    Seconds to wait for restarted services to become running
+                  and healthy, when compose supports 'up --wait' (default: 300)
+  SETTLE_SECONDS  Seconds to wait before re-checking running services after
+                  a restart (default: 5)
 EOF
 }
 
@@ -47,6 +54,10 @@ while [[ $# -gt 0 ]]; do
     *) echo "${LOG_PREFIX} unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
   shift
+done
+
+for var in WAIT_TIMEOUT SETTLE_SECONDS; do
+  [[ "${!var}" =~ ^[0-9]+$ ]] || { echo "${LOG_PREFIX} ${var} must be a whole number of seconds, got '${!var}'" >&2; exit 2; }
 done
 
 # Colour helpers (disabled when not a TTY or NO_COLOR is set); timestamps are
@@ -118,12 +129,28 @@ else
   exit 1
 fi
 
+# 'up --wait' (compose v2.1+) blocks until the restarted containers are
+# running and, where a healthcheck is defined, healthy — and fails if they
+# are not. '--wait-timeout' (v2.17+) bounds how long that can take.
+UP_WAIT=()
+up_help=$("${COMPOSE[@]}" up --help 2>/dev/null || true)
+if grep -q -- '--wait-timeout' <<<"$up_help"; then
+  UP_WAIT=(--wait --wait-timeout "$WAIT_TIMEOUT")
+elif grep -q -- '--wait' <<<"$up_help"; then
+  UP_WAIT=(--wait)
+fi
+
 if [[ ! -d "$COMPOSE_ROOT" ]]; then
   err "Compose root '${COMPOSE_ROOT}' does not exist or is not a directory."
   exit 1
 fi
 
 log "Using compose command: ${COMPOSE[*]}"
+if [[ ${#UP_WAIT[@]} -gt 0 ]]; then
+  log "Health checks: waiting for services with '${UP_WAIT[*]}'"
+else
+  warn "This compose version has no 'up --wait' — health checks are not verified."
+fi
 log "Scanning ${COMPOSE_ROOT}"
 [[ "$DRY_RUN" == true ]] && warn "Dry-run mode: no projects will be restarted."
 echo
@@ -273,12 +300,18 @@ for project_dir in "${COMPOSE_ROOT}"/*/; do
   # Restart: 'up -d' recreates only the containers whose configuration or
   # image changed (and their dependents, e.g. network_mode: service: sidecars)
   # — far less downtime than a full down/up, and a failed start cannot take
-  # the whole project offline.
+  # the whole project offline. With --wait, it also fails when a restarted
+  # service does not become healthy; that is reported, not retried with a
+  # down/up, which would only take the rest of the project offline too.
   # -------------------------------------------------------------------------
   ok "${project_name}: new image(s) found — updating project."
 
-  if ! compose up -d --remove-orphans "${services_list[@]}"; then
-    err "${project_name}: 'compose up' failed."
+  if ! compose up -d ${UP_WAIT[@]+"${UP_WAIT[@]}"} --remove-orphans "${services_list[@]}"; then
+    if [[ ${#UP_WAIT[@]} -gt 0 ]]; then
+      err "${project_name}: 'compose up' failed or services did not become healthy."
+    else
+      err "${project_name}: 'compose up' failed."
+    fi
     failed_projects+=("${project_name}")
     echo
     continue
@@ -291,7 +324,7 @@ for project_dir in "${COMPOSE_ROOT}"/*/; do
   missing=$(missing_services "$services_before" "$(running_services)")
   if [[ -n "$missing" ]]; then
     warn "${project_name}: not running after 'up -d': ${missing//$'\n'/ } — trying full down/up."
-    if ! compose down || ! compose up -d "${services_list[@]}"; then
+    if ! compose down || ! compose up -d ${UP_WAIT[@]+"${UP_WAIT[@]}"} "${services_list[@]}"; then
       err "${project_name}: full restart failed."
       failed_projects+=("${project_name}")
       echo

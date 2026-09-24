@@ -27,6 +27,12 @@
 #                              compose-style warning to stderr (simulates an
 #                              unset .env variable) without failing
 #   .stub_pull_fail            if present, 'pull' fails
+#   .stub_unhealthy            if present, 'up --wait' fails as if a
+#                              service never became healthy
+#
+# 'up --help' advertises --wait and --wait-timeout, like compose v2.17+.
+# Set STUB_WAIT=basic to advertise only --wait (v2.1–v2.16), or STUB_WAIT=none
+# to advertise neither (older compose).
 # =============================================================================
 set -u
 cmd="$1"; shift
@@ -61,9 +67,22 @@ case "$cmd" in
         echo "stub: pulled"
         ;;
       up)
+        for a in "$@"; do
+          if [[ $a == --help ]]; then
+            case "${STUB_WAIT:-full}" in
+              full)  printf '      --wait\n      --wait-timeout int\n' ;;
+              basic) printf '      --wait\n' ;;
+            esac
+            exit 0
+          fi
+        done
         n=$(cat .stub_up_count 2>/dev/null || echo 0)
         echo $((n + 1)) > .stub_up_count
         printf '%s\n' "$*" >> .stub_up_args
+        if [[ -f .stub_unhealthy && " $* " == *" --wait "* ]]; then
+          echo "container app is unhealthy" >&2
+          exit 1
+        fi
         ;;
       down) touch .stub_down_done ;;
       *) echo "stub: unexpected compose subcommand: $sub" >&2; exit 64 ;;
